@@ -22,31 +22,31 @@ module f_vesin
      real( c_double ) :: &
           ! /// Spherical cutoff, only pairs below this cutoff will be included
           ! double cutoff;
-          cutoff
+          cutoff = 0.0_c_double
 
      logical( c_bool ) :: &
 
           ! /// Should the returned neighbor list be a full list (include both `i -> j`
           ! /// and `j -> i` pairs) or a half list (include only `i -> j`)?
           ! bool full;
-          full, &
+          full = .false., &
 
           ! /// Should the neighbor list be sorted? If yes, the returned pairs will be
           ! /// sorted using lexicographic order.
           ! bool sorted;
-          sorted, &
+          sorted = .false., &
 
           ! /// Should the returned `VesinNeighborList` contain `shifts`?
           ! bool return_shifts;
-          return_shifts, &
+          return_shifts = .false., &
 
           ! /// Should the returned `VesinNeighborList` contain `distances`?
           ! bool return_distances;
-          return_distances, &
+          return_distances = .false., &
 
           ! /// Should the returned `VesinNeighborList` contain `vector`?
           ! bool return_vectors;
-          return_vectors
+          return_vectors = .false.
 
   end type VesinOptions
 
@@ -179,72 +179,46 @@ module f_vesin
 contains
 
 
-  function vesin_compute()result(ierr)
+  function vesin_compute( nat, pos, box, vesin_opts, vesin_neighbors, errmsg )result(ierr)
     !!
-    !! hard-code copy of the example test program in C, from:
-    !! https://luthaf.fr/vesin/latest/index.html#usage-example
     !!
     implicit none
-    integer :: ierr
+    integer( c_int ), intent(in) :: nat
+    real( c_double ), intent(in) :: pos(3,nat)
+    real( c_double ), intent(in) :: box(3,3)
+    type( VesinOptions ), intent(in) :: vesin_opts
+    type( VesinNeighborList ), intent(out) :: vesin_neighbors
+    character(:), allocatable, intent(out) :: errmsg
+    integer( c_int ) :: ierr
 
     logical( c_bool ) :: periodic
 
-    real( c_double ) :: c_box(3,3)
-    real( c_double ) :: c_points(2,3) ! N x 3
     integer( c_size_t ) :: c_nat
 
     logical( c_bool ) :: c_periodic
-    type( c_ptr ) :: c_device, c_options, c_error_message
-    integer( c_int ) :: c_err
-    type( vesinoptions ) :: opts
     integer(c_int) :: dev
-    type( VesinNeighborList ) :: c_neighbors
-    ! type( vesinneighborlist ), pointer :: neigh
-    integer, pointer :: l
-    character(:), allocatable :: errmsg
 
-    c_points(1,:) = 0.0_c_double
-    c_points(2,:) = [0.0_c_double, 1.3_c_double, 1.3_c_double]
+    c_nat = int( nat, c_size_t )
 
-    c_box(:,1) = [3.2_c_double, 0.0_c_double, 0.0_c_double]
-    c_box(:,2) = [0.0_c_double, 3.2_c_double, 0.0_c_double]
-    c_box(:,3) = [0.0_c_double, 0.0_c_double, 3.2_c_double]
+    ! c_periodic = .false.
+    c_periodic = .true.
 
-    c_nat = 2_c_size_t
 
-    c_periodic = logical( .true., c_bool )
-
-    opts% cutoff = 4.2_c_double
-    opts% full = .true.
-    opts% return_shifts = .true.
-    opts% return_distances = .true.
-    opts% return_vectors = .false.
-
-    ! c_options = c_loc( opts )
-
+    ! set cpu device
     dev = VesinCPU
+    vesin_neighbors% device = VesinCPU
 
-    c_neighbors% device = VesinCPU
-
-    ierr = int( fvesin_neighbors( &
-         c_points,       &
+    ierr = fvesin_neighbors( &
+         pos,            &
          c_nat,          &
-         c_box,          &
+         box,            &
          c_periodic,     &
-         dev,       &
-         opts, &
-         c_neighbors,    &
-         c_error_message ) )
+         dev,            &
+         vesin_opts,         &
+         vesin_neighbors,    &
+         c_error_message )
 
-    ! call c_f_pointer( c_neighbors, neigh )
-    ! write(*,*) c_neighbors&length
-    if( ierr /= 0 ) then
-       errmsg=c2f_string( c_error_message)
-       write(*,*) errmsg
-    end if
-
-    ! write(*,*) "neigh%length:", neigh%length
-    write(*,*) c_neighbors% length
+    if( int(ierr) /= 0 ) errmsg = c2f_string(c_error_message)
 
   end function vesin_compute
 
