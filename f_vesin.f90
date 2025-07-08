@@ -162,19 +162,29 @@ module f_vesin
             error_message  &
        )result(res)bind( c, name="vesin_neighbors" )
        import :: c_double, c_size_t, c_bool, c_ptr, c_int, VesinOptions, VesinNeighborList
-       real( c_double ), intent(in) :: points(:, :)
        integer( c_size_t ), value :: n_points
+       real( c_double ), intent(in) :: points(3, n_points)
        real( c_double ), intent(in) :: box(3,3)
        logical( c_bool ), value :: periodic
-       ! type( VesinDevice ), value :: device
        integer(c_int), value :: device
        type( VesinOptions ), value :: options
-       ! type( c_ptr ), value :: neighbors
        type( VesinNeighborList ) :: neighbors
        type( c_ptr ) :: error_message
        integer( c_int ) :: res
      end function fvesin_neighbors
   end interface
+
+
+  ! /// Free all allocated memory inside a `VesinNeighborList`, according the it's
+  ! /// `device`.
+  ! void VESIN_API vesin_free(struct VesinNeighborList* neighbors);
+  interface
+     subroutine fvesin_free( neighbors ) bind(C, name="vesin_free")
+       import :: VesinNeighborList
+       type( VesinNeighborList ), value :: neighbors
+     end subroutine fvesin_free
+  end interface
+
 
 contains
 
@@ -198,11 +208,22 @@ contains
     logical( c_bool ) :: c_periodic
     type( c_ptr ) :: c_error_message
     integer(c_int) :: dev
+    type( c_ptr ) :: c_pos
+    integer :: i
 
     c_nat = int( nat, c_size_t )
 
     ! c_periodic = .false.
     c_periodic = .true.
+
+    ! do i = 1, nat
+    !    write(*,*) i, pos(:,i)
+    ! end do
+
+    ! do i = 1, 3
+    !    write(*,*) i, box(:,i)
+    ! end do
+
 
 
     ! set cpu device
@@ -222,6 +243,13 @@ contains
     if( int(ierr) /= 0 ) errmsg = c2f_string(c_error_message)
 
   end function vesin_compute
+
+  subroutine vesin_free( neighbors )
+    implicit none
+    type( VesinNeighborList ), intent(inout) :: neighbors
+
+    call fvesin_free( neighbors )
+  end subroutine vesin_free
 
 
   FUNCTION c2f_string(ptr) RESULT(f_string)

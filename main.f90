@@ -36,4 +36,6 @@ program main
 
   write(*,*) "n pairs:", neigh% length
 
+  call vesin_free( neigh )
+  deallocate( typ, pos )
 end program main
