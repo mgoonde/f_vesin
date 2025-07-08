@@ -1,6 +1,12 @@
 module f_vesin
 
   use, intrinsic :: iso_c_binding
+  implicit none
+
+  private
+  public :: VesinOptions, VesinNeighborList
+  public :: vesin_compute, vesin_free
+  public :: f_VesinNeighborList
 
 
   ! /// Device on which the data can be
@@ -34,7 +40,7 @@ module f_vesin
           ! /// Should the neighbor list be sorted? If yes, the returned pairs will be
           ! /// sorted using lexicographic order.
           ! bool sorted;
-          sorted = .false., &
+          sorted = .true., &
 
           ! /// Should the returned `VesinNeighborList` contain `shifts`?
           ! bool return_shifts;
@@ -113,6 +119,26 @@ module f_vesin
 
   end type VesinNeighborList
 
+  ! cast the above type to f data
+  type :: f_VesinNeighborList
+     integer( c_size_t ) :: length = 0_c_size_t
+     integer( c_size_t ),  allocatable :: pairs(:,:)
+     integer( c_int32_t ), allocatable :: shifts(:,:)
+     real( c_double ),     allocatable :: distances(:)
+     real(c_double ),      allocatable :: vectors(:,:)
+   contains
+     procedure :: destroy => f_VesinNeighborList_destroy
+  end type f_VesinNeighborList
+
+  type :: vesin
+     type( VesinOptions ) :: options
+   contains
+     procedure :: compute
+     final :: destroy
+  end type vesin
+
+
+
 
   ! /// Compute a neighbor list.
   ! ///
@@ -159,7 +185,7 @@ module f_vesin
           device,        &
           options,       &
           neighbors,     &
-            error_message  &
+          error_message  &
        )result(res)bind( c, name="vesin_neighbors" )
        import :: c_double, c_size_t, c_bool, c_ptr, c_int, VesinOptions, VesinNeighborList
        integer( c_size_t ), value :: n_points
@@ -189,7 +215,7 @@ module f_vesin
 contains
 
 
-  function vesin_compute( nat, pos, box, vesin_opts, vesin_neighbors, errmsg )result(ierr)
+  function vesin_compute( nat, pos, box, vesin_opts, vesin_neighbors, errmsg, fneigh )result(ierr)
     !!
     !!
     implicit none
@@ -208,22 +234,13 @@ contains
     logical( c_bool ) :: c_periodic
     type( c_ptr ) :: c_error_message
     integer(c_int) :: dev
-    type( c_ptr ) :: c_pos
-    integer :: i
+    type( f_VesinNeighborList ), intent(out) :: fneigh
+    integer :: n
 
     c_nat = int( nat, c_size_t )
 
     ! c_periodic = .false.
     c_periodic = .true.
-
-    ! do i = 1, nat
-    !    write(*,*) i, pos(:,i)
-    ! end do
-
-    ! do i = 1, 3
-    !    write(*,*) i, box(:,i)
-    ! end do
-
 
 
     ! set cpu device
@@ -242,17 +259,76 @@ contains
 
     if( int(ierr) /= 0 ) errmsg = c2f_string(c_error_message)
 
+    ! allocate(fneigh)
+    ! n = vesin_neighbors% length
+    ! fneigh%length = n
+    ! call c_f_pointer( vesin_neighbors%pairs, fneigh%pairs, shape=[2,n] )
+    fneigh = assign_c2f( vesin_neighbors )
+
   end function vesin_compute
 
   subroutine vesin_free( neighbors )
+    !! 
     implicit none
     type( VesinNeighborList ), intent(inout) :: neighbors
-
     call fvesin_free( neighbors )
   end subroutine vesin_free
 
 
-  FUNCTION c2f_string(ptr) RESULT(f_string)
+  subroutine f_VesinNeighborList_destroy( self )
+    !! destructor for `type( f_VesinNeighborList )`
+    implicit none
+    class( f_VesinNeighborList ), intent(inout) :: self
+    if( allocated( self% pairs ) )     deallocate( self% pairs )
+    if( allocated( self% shifts ) )    deallocate( self% shifts )
+    if( allocated( self% distances ) ) deallocate( self% distances )
+    if( allocated( self% vectors ) )   deallocate( self% vectors )
+  end subroutine f_VesinNeighborList_destroy
+
+
+  function assign_c2f( c )result(f)
+    !! shift the memory allocation from the C struc `VesinNeighborList` where data is
+    !! declared as `type(c_ptr)`, to the fortran derived type `f_VesinNeighborList`,
+    !! which contains fortran-allocated data in C precision.
+    !!
+    !! After this operation, the C struc `VesinNeighborList` can be `free`d
+    !! without loss of memory for the fortran type.
+    implicit none
+    type( VesinNeighborList ), intent(in) :: c
+    type( f_VesinNeighborList ) :: f
+
+    integer :: n
+    integer( c_size_t ), pointer :: pairs(:,:) => null()
+    integer( c_int32_t ), pointer :: shifts(:,:) => null()
+    real(c_double ), pointer :: distances(:) => null()
+    real( c_double ), pointer :: vectors(:,:) => null()
+
+    f% length = c% length
+    n = int( f%length, kind(n) )
+    ! pairs
+    if( c_associated(c%pairs)) then
+       call c_f_pointer( c%pairs, pairs, shape=[2,n])
+       allocate( f%pairs, source=pairs )
+    end if
+    ! shifts
+    if( c_associated(c%shifts)) then
+       call c_f_pointer( c%shifts, shifts, shape=[3,n])
+       allocate( f%shifts, source=shifts )
+    end if
+    ! distances
+    if( c_associated(c%distances)) then
+       call c_f_pointer( c%distances, distances, shape=[n] )
+       allocate( f%distances, source=distances )
+    end if
+    ! vectors
+    if( c_associated(c%vectors))then
+       call c_f_pointer( c%vectors, vectors, shape=[3,n])
+       allocate( f%vectors, source=vectors )
+    end if
+  end function assign_c2f
+
+
+  function c2f_string(ptr) result(f_string)
     implicit none
     interface
        function c_strlen(str) bind(c, name='strlen')
@@ -262,24 +338,21 @@ contains
          integer(c_size_t) :: c_strlen
        end function c_strlen
     end interface
-    TYPE(c_ptr), INTENT(IN) :: ptr
-    CHARACTER(LEN=:), ALLOCATABLE :: f_string
-    CHARACTER(LEN=1, KIND=c_char), DIMENSION(:), POINTER :: c_string
-    INTEGER :: n, i
+    type(c_ptr), intent(in) :: ptr
+    character(len=:), allocatable :: f_string
+    character(len=1, kind=c_char), dimension(:), pointer :: c_string
+    integer :: n, i
 
-    IF (.NOT. C_ASSOCIATED(ptr)) THEN
+    if (.not. c_associated(ptr)) then
        f_string = ' '
-    ELSE
-       n = INT(c_strlen(ptr), KIND=KIND(n))
-       ! write(*,*) "strlen",n
-       CALL C_F_POINTER(ptr, c_string, [n+1])
-       allocate( CHARACTER(LEN=n)::f_string)
+    else
+       n = int(c_strlen(ptr), kind=kind(n))
+       call c_f_pointer(ptr, c_string, [n+1])
+       allocate( character(len=n)::f_string)
        do i = 1, n
           f_string(i:i) = c_string(i)
        end do
-
-       ! f_string = array2string(c_string, n)
-    END IF
-  END FUNCTION c2f_string
+    end if
+  end function c2f_string
 
 end module f_vesin

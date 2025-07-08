@@ -13,6 +13,7 @@ program main
   character(:), allocatable :: errmsg
   type( VesinOptions ) :: options
   type( VesinNeighborList ) :: neigh
+  type( f_VesinNeighborList ) :: fneigh
 
   read(*,*) nat
   read(*,'(a256)') line
@@ -29,13 +30,21 @@ program main
 
   options% cutoff = 4.2_c_double
   options% full = .true.
-  ierr = vesin_compute( nat, pos, lat, options, neigh, errmsg )
+  options% sorted = .true.
+  options% return_vectors = .true.
+  ierr = vesin_compute( nat, pos, lat, options, neigh, errmsg, fneigh )
   if( ierr /= 0 ) then
      write(*,*) errmsg
   end if
-
-  write(*,*) "n pairs:", neigh% length
-
   call vesin_free( neigh )
+
+  write(*,*) "n pairs:", fneigh% length
+
+  do i = 1, fneigh% length
+     write(*,*) fneigh% pairs(:,i), fneigh% vectors(:,i)
+  end do
+
+
+  call fneigh% destroy()
   deallocate( typ, pos )
 end program main
