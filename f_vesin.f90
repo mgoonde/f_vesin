@@ -73,37 +73,43 @@ module f_vesin
   ! /// Under periodic boundary conditions, two atoms can be part of multiple pairs,
   ! /// each pair having a different periodic shift.
   ! struct VESIN_API VesinNeighborList {
-  type :: VesinNeighborList
+  type, bind(c) :: VesinNeighborList
 
      ! /// Number of pairs in this neighbor list
      ! size_t length;
-     integer( c_size_t ) :: length
+     integer( c_size_t ) :: length = 0_c_size_t
      ! type( c_ptr ) :: length
 
      ! /// Device used for the data allocations
      ! VesinDevice device;
-     integer( c_int ) :: device !! enum type VesinDevice
+     integer( c_int ) :: device = VesinCPU
 
      ! /// Array of pairs (storing the indices of the first and second point in the
      ! /// pair), containing `length` elements.
      ! size_t (*pairs)[2];
-     integer( c_size_t ), allocatable :: pairs(:,:)
+     ! integer( c_size_t ), allocatable :: pairs(:,:)
+     ! integer( c_size_t ), pointer :: pairs(:,:)
+     type( c_ptr ) :: pairs = c_null_ptr
 
      ! /// Array of box shifts, one for each `pair`. This is only set if
      ! /// `options.return_pairs` was `true` during the calculation.
      ! int32_t (*shifts)[3];
-     integer( c_int32_t ), allocatable :: shifts(:,:)
+     ! integer( c_int32_t ), allocatable :: shifts(:,:)
+     type( c_ptr ) :: shifts = c_null_ptr
 
      ! /// Array of pair distance (i.e. distance between the two points), one for
      ! /// each pair. This is only set if `options.return_distances` was `true`
      ! /// during the calculation.
      ! double *distances;
-     real( c_double ), allocatable :: distances(:)
+     ! real( c_double ), allocatable :: distances(:)
+     type( c_ptr ) :: distances = c_null_ptr
 
      ! /// Array of pair vector (i.e. vector between the two points), one for
      ! /// each pair. This is only set if `options.return_vector` was `true`
      ! /// during the calculation.
-     real( c_double ), allocatable :: vecors(:,:)
+     ! double (*vectors)[3];
+     ! real( c_double ), allocatable :: vectors(:,:)
+     type( c_ptr ) :: vectors = c_null_ptr
 
   end type VesinNeighborList
 
@@ -155,7 +161,7 @@ module f_vesin
           neighbors,     &
             error_message  &
        )result(res)bind( c, name="vesin_neighbors" )
-       import :: c_double, c_size_t, c_bool, c_ptr, c_int, VesinOptions
+       import :: c_double, c_size_t, c_bool, c_ptr, c_int, VesinOptions, VesinNeighborList
        real( c_double ), intent(in) :: points(:, :)
        integer( c_size_t ), value :: n_points
        real( c_double ), intent(in) :: box(3,3)
@@ -163,7 +169,8 @@ module f_vesin
        ! type( VesinDevice ), value :: device
        integer(c_int), value :: device
        type( VesinOptions ), value :: options
-       type( c_ptr ), value :: neighbors
+       ! type( c_ptr ), value :: neighbors
+       type( VesinNeighborList ) :: neighbors
        type( c_ptr ) :: error_message
        integer( c_int ) :: res
      end function fvesin_neighbors
@@ -187,11 +194,12 @@ contains
     integer( c_size_t ) :: c_nat
 
     logical( c_bool ) :: c_periodic
-    type( c_ptr ) :: c_device, c_options, c_neighbors, c_error_message
+    type( c_ptr ) :: c_device, c_options, c_error_message
     integer( c_int ) :: c_err
     type( vesinoptions ) :: opts
     integer(c_int) :: dev
-    type( vesinneighborlist ), pointer :: neigh
+    type( VesinNeighborList ) :: c_neighbors
+    ! type( vesinneighborlist ), pointer :: neigh
     integer, pointer :: l
     character(:), allocatable :: errmsg
 
@@ -216,9 +224,7 @@ contains
 
     dev = VesinCPU
 
-    allocate( neigh )
-    neigh% device = dev
-    c_neighbors = c_loc( neigh )
+    c_neighbors% device = VesinCPU
 
     ierr = int( fvesin_neighbors( &
          c_points,       &
@@ -237,7 +243,8 @@ contains
        write(*,*) errmsg
     end if
 
-    write(*,*) "neigh%length:", neigh%length
+    ! write(*,*) "neigh%length:", neigh%length
+    write(*,*) c_neighbors% length
 
   end function vesin_compute
 
