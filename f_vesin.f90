@@ -3,6 +3,18 @@ module f_vesin
   use, intrinsic :: iso_c_binding
 
 
+  ! /// Device on which the data can be
+  ! enum VesinDevice {
+  ! /// Unknown device, used for default initialization and to indicate no
+  ! /// allocated data.
+  ! VesinUnknownDevice = 0,
+  integer( c_int ), parameter :: VesinUnknownDevice = 0
+  ! /// CPU device
+  ! VesinCPU = 1,
+  integer( c_int ), parameter :: VesinCPU = 1
+  ! };
+
+
   ! /// Options for a neighbor list calculation
   ! struct VesinOptions {
   type, bind(c) ::  VesinOptions
@@ -38,19 +50,6 @@ module f_vesin
 
   end type VesinOptions
 
-  ! /// Device on which the data can be
-  ! enum VesinDevice {
-  type :: VesinDevice
-
-     ! /// Unknown device, used for default initialization and to indicate no
-     ! /// allocated data.
-     ! VesinUnknownDevice = 0,
-     integer( c_int ) :: VesinUnknownDevice = 0
-
-     ! /// CPU device
-     ! VesinCPU = 1,
-     integer( c_int ) :: VesinCPU = 1
-  end type VesinDevice
 
 
 
@@ -83,7 +82,7 @@ module f_vesin
 
      ! /// Device used for the data allocations
      ! VesinDevice device;
-     type( c_ptr ) :: device !! enum type VesinDevice
+     integer( c_int ) :: device !! enum type VesinDevice
 
      ! /// Array of pairs (storing the indices of the first and second point in the
      ! /// pair), containing `length` elements.
@@ -156,14 +155,15 @@ module f_vesin
           neighbors,     &
             error_message  &
        )result(res)bind( c, name="vesin_neighbors" )
-       import :: c_double, c_size_t, c_bool, c_ptr, c_int,VesinOptions
+       import :: c_double, c_size_t, c_bool, c_ptr, c_int, VesinOptions
        real( c_double ), intent(in) :: points(:, :)
        integer( c_size_t ), value :: n_points
        real( c_double ), intent(in) :: box(3,3)
        logical( c_bool ), value :: periodic
-       type( c_ptr ) :: device
+       ! type( VesinDevice ), value :: device
+       integer(c_int), value :: device
        type( VesinOptions ), value :: options
-       type( c_ptr ) :: neighbors
+       type( c_ptr ), value :: neighbors
        type( c_ptr ) :: error_message
        integer( c_int ) :: res
      end function fvesin_neighbors
@@ -190,7 +190,8 @@ contains
     type( c_ptr ) :: c_device, c_options, c_neighbors, c_error_message
     integer( c_int ) :: c_err
     type( vesinoptions ) :: opts
-    type( vesinneighborlist ) :: neigh
+    integer(c_int) :: dev
+    type( vesinneighborlist ), pointer :: neigh
     integer, pointer :: l
     character(:), allocatable :: errmsg
 
@@ -213,14 +214,18 @@ contains
 
     ! c_options = c_loc( opts )
 
+    dev = VesinCPU
+
+    allocate( neigh )
+    neigh% device = dev
+    c_neighbors = c_loc( neigh )
 
     ierr = int( fvesin_neighbors( &
          c_points,       &
          c_nat,          &
          c_box,          &
          c_periodic,     &
-         c_device,       &
-         ! c_options,      &
+         dev,       &
          opts, &
          c_neighbors,    &
          c_error_message ) )
@@ -232,7 +237,7 @@ contains
        write(*,*) errmsg
     end if
 
-    write(*,*) neigh%length
+    write(*,*) "neigh%length:", neigh%length
 
   end function vesin_compute
 
