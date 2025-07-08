@@ -162,7 +162,7 @@ module f_vesin
        real( c_double ), intent(in) :: box(3,3)
        logical( c_bool ), value :: periodic
        type( c_ptr ) :: device
-       type( VesinOptions ) :: options
+       type( VesinOptions ), value :: options
        type( c_ptr ) :: neighbors
        type( c_ptr ) :: error_message
        integer( c_int ) :: res
