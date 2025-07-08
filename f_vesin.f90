@@ -196,6 +196,7 @@ contains
     integer( c_size_t ) :: c_nat
 
     logical( c_bool ) :: c_periodic
+    type( c_ptr ) :: c_error_message
     integer(c_int) :: dev
 
     c_nat = int( nat, c_size_t )
