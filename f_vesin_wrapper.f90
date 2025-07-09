@@ -7,8 +7,59 @@ module f_vesin_wrapper
   public :: vesin_t
   public :: rp
 
-  !! precision used by caller code (change as needed)
+  ! Real precision used by caller code for input variables: `cutoff`, `pos`, `box`.
+  ! Modify as needed.
   integer, parameter :: rp = kind(1.0_c_double)
+
+
+  !> @details
+  !! Fortran wrapper to `vesin`.
+  !! Defines the derived type `vesin_t`, which holds the options and return values of
+  !! the `vesin` neighbor list.
+  !!
+  !! @author Miha Gunde
+  !!
+  !! test program:
+  !!
+  !!~~~~~~~~{.f90}
+  !!
+  !! program main
+  !!   use f_vesin_wrapper, only: vesin_t, rp
+  !!   implicit none
+  !!   type( vesin_t ), pointer :: neigh
+  !!   integer, parameter :: nat=2
+  !!   real(rp) :: pos(3,nat)
+  !!   real(rp) :: box(3,3)
+  !!   integer :: ierr
+  !!
+  !!   ! positions
+  !!   pos(:,1) = [ 0.0_rp, 0.0_rp, 0.0_rp ]
+  !!   pos(:,2) = [ 0.0_rp, 1.3_rp, 1.3_rp ]
+  !!
+  !!   ! lattice
+  !!   box(:,1) = [ 3.2_rp, 0.0_rp, 0.0_rp ]
+  !!   box(:,2) = [ 0.0_rp, 3.2_rp, 0.0_rp ]
+  !!   box(:,3) = [ 0.0_rp, 0.0_rp, 3.2_rp ]
+  !!
+  !!   ! create the instance, set options
+  !!   neigh => vesin_t( cutoff=4.2_rp, full=.true., return_shifts=.true., return_distances=.true. )
+  !!
+  !!   ! launch computation of neighbor list
+  !!   ierr = neigh% compute( nat, pos, box )
+  !!   if( ierr/= 0 ) then
+  !!      write(*,*) neigh% errmsg
+  !!      stop
+  !!   end if
+  !!
+  !!   ! data is inside `neigh`:
+  !!   write(*,*) "got length:", neigh% length
+  !!
+  !!   ! destroy data
+  !!   deallocate( neigh )
+  !!
+  !! end program main
+  !!
+  !!~~~~~~~~
 
 
   ! /// Device on which the data can be
@@ -22,8 +73,13 @@ module f_vesin_wrapper
   integer( c_int ), parameter :: VesinCPU = 1
   ! };
 
-  ! /// Options for a neighbor list calculation
-  ! struct VesinOptions {
+
+  !> @details
+  !! Used for storing Vesin options.
+  !! Equivalent to:
+  !!
+  !! struct VesinOptions {} from `vesin.h`
+  !!
   type, bind(c) ::  VesinOptions
 
      real( c_double ) :: &
@@ -57,32 +113,18 @@ module f_vesin_wrapper
 
   end type VesinOptions
 
-  ! /// The actual neighbor list
-  ! ///
-  ! /// This is organized as a list of pairs, where each pair can contain the
-  ! /// following data:
-  ! ///
-  ! /// - indices of the points in the pair;
-  ! /// - distance between points in the pair, accounting for periodic boundary
-  ! ///   conditions;
-  ! /// - vector between points in the pair, accounting for periodic boundary
-  ! ///   conditions;
-  ! /// - periodic shift that created the pair. This is only relevant when using
-  ! ///   periodic boundary conditions, and contains the number of bounding box we
-  ! ///   need to cross to create the pair. If the positions of the points are `r_i`
-  ! ///   and `r_j`, the bounding box is described by a matrix of three vectors `H`,
-  ! ///   and the periodic shift is `S`, the distance vector for a given pair will
-  ! ///   be given by `r_ij = r_j - r_i + S @ H`.
-  ! ///
-  ! /// Under periodic boundary conditions, two atoms can be part of multiple pairs,
-  ! /// each pair having a different periodic shift.
-  ! struct VESIN_API VesinNeighborList {
+
+  !> @details
+  !! Used as return type from `vesin_neighbors()`.
+  !! Equvalent to:
+  !!
+  !! struct VESIN_API VesinNeighborList {} from `vesin.h`
+  !!
   type, bind(c) :: VesinNeighborList
 
      ! /// Number of pairs in this neighbor list
      ! size_t length;
      integer( c_size_t ) :: length = 0_c_size_t
-     ! type( c_ptr ) :: length
 
      ! /// Device used for the data allocations
      ! VesinDevice device;
@@ -113,28 +155,6 @@ module f_vesin_wrapper
   end type VesinNeighborList
 
 
-  ! /// Compute a neighbor list.
-  ! ///
-  ! /// The data is returned in a `VesinNeighborList`. For an initial call, the
-  ! /// `VesinNeighborList` should be zero-initialized (or default-initalized in
-  ! /// C++). The `VesinNeighborList` can be re-used across calls to this functions
-  ! /// to re-use memory allocations, and once it is no longer needed, users should
-  ! /// call `vesin_free` to release the corresponding memory.
-  ! ///
-  ! /// @param points positions of all points in the system;
-  ! /// @param n_points number of elements in the `points` array
-  ! /// @param box bounding box for the system. If the system is non-periodic,
-  ! ///     this is ignored. This should contain the three vectors of the bounding
-  ! ///     box, one vector per row of the matrix.
-  ! /// @param periodic is the system using periodic boundary conditions?
-  ! /// @param device device where the `points` and `box` data is allocated.
-  ! /// @param options options for the calculation
-  ! /// @param neighbors non-NULL pointer to `VesinNeighborList` that will be used
-  ! ///     to store the computed list of neighbors.
-  ! /// @param error_message Pointer to a `char*` that wil be set to the error
-  ! ///     message if this function fails. This does not need to be freed when no
-  ! ///     longer needed.
-  !
   ! C-header:
   !
   !~~~~~~~~~~~~~~~~~{.c}
@@ -174,9 +194,11 @@ module f_vesin_wrapper
   end interface
 
 
-  ! /// Free all allocated memory inside a `VesinNeighborList`, according the it's
-  ! /// `device`.
+  ! C-header:
+  !
+  !~~~~~~~~~~~~{.c}
   ! void VESIN_API vesin_free(struct VesinNeighborList* neighbors);
+  !~~~~~~~~~~~~
   interface
      subroutine fvesin_free( neighbors ) bind(C, name="vesin_free")
        import :: VesinNeighborList
