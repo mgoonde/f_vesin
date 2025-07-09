@@ -1,12 +1,14 @@
-module f_vesin
+module f_vesin_wrapper
 
   use, intrinsic :: iso_c_binding
   implicit none
 
   private
-  public :: VesinOptions, VesinNeighborList
-  public :: vesin_compute, vesin_free
-  public :: f_VesinNeighborList
+  public :: vesin_t
+  public :: rp
+
+  !! precision used by caller code (change as needed)
+  integer, parameter :: rp = kind(1.0_c_double)
 
 
   ! /// Device on which the data can be
@@ -19,7 +21,6 @@ module f_vesin
   ! VesinCPU = 1,
   integer( c_int ), parameter :: VesinCPU = 1
   ! };
-
 
   ! /// Options for a neighbor list calculation
   ! struct VesinOptions {
@@ -56,9 +57,6 @@ module f_vesin
 
   end type VesinOptions
 
-
-
-
   ! /// The actual neighbor list
   ! ///
   ! /// This is organized as a list of pairs, where each pair can contain the
@@ -93,51 +91,26 @@ module f_vesin
      ! /// Array of pairs (storing the indices of the first and second point in the
      ! /// pair), containing `length` elements.
      ! size_t (*pairs)[2];
-     ! integer( c_size_t ), allocatable :: pairs(:,:)
-     ! integer( c_size_t ), pointer :: pairs(:,:)
      type( c_ptr ) :: pairs = c_null_ptr
 
      ! /// Array of box shifts, one for each `pair`. This is only set if
      ! /// `options.return_pairs` was `true` during the calculation.
      ! int32_t (*shifts)[3];
-     ! integer( c_int32_t ), allocatable :: shifts(:,:)
      type( c_ptr ) :: shifts = c_null_ptr
 
      ! /// Array of pair distance (i.e. distance between the two points), one for
      ! /// each pair. This is only set if `options.return_distances` was `true`
      ! /// during the calculation.
      ! double *distances;
-     ! real( c_double ), allocatable :: distances(:)
      type( c_ptr ) :: distances = c_null_ptr
 
      ! /// Array of pair vector (i.e. vector between the two points), one for
      ! /// each pair. This is only set if `options.return_vector` was `true`
      ! /// during the calculation.
      ! double (*vectors)[3];
-     ! real( c_double ), allocatable :: vectors(:,:)
      type( c_ptr ) :: vectors = c_null_ptr
 
   end type VesinNeighborList
-
-  ! cast the above type to f data
-  type :: f_VesinNeighborList
-     integer( c_size_t ) :: length = 0_c_size_t
-     integer( c_size_t ),  allocatable :: pairs(:,:)
-     integer( c_int32_t ), allocatable :: shifts(:,:)
-     real( c_double ),     allocatable :: distances(:)
-     real(c_double ),      allocatable :: vectors(:,:)
-   contains
-     procedure :: destroy => f_VesinNeighborList_destroy
-  end type f_VesinNeighborList
-
-  type :: vesin
-     type( VesinOptions ) :: options
-   contains
-     procedure :: compute
-     final :: destroy
-  end type vesin
-
-
 
 
   ! /// Compute a neighbor list.
@@ -212,90 +185,146 @@ module f_vesin
   end interface
 
 
+
+  !> @details
+  !! fortran derived type, holding the input options and output data from Vesin.
+  !!
+  !! Use as:
+  !!~~~~~~~~{.f90}
+  !!
+  !! program main
+  !!   use f_vesin_wrapper
+  !!   type( vesin_t ), pointer :: me
+  !!
+  !!   ! create the instance, set options
+  !!   me => vesin_t( cutoff=<val>, return_vectors=<val>, etc)
+  !!
+  !!   ! launch computation of neighbor list
+  !!   ierr = me% compute( nat, pos, box )
+  !!   if( ierr/= 0 ) then
+  !!      write(*,*) me% errmsg
+  !!      stop
+  !!   end if
+  !!
+  !!   ! data is inside `me`:
+  !!   write(*,*) me% pairs
+  !!
+  !!   ! destroy data
+  !!   deallocate( me )
+  !!
+  !! end program main
+  !!
+  !!~~~~~~~~
+  type :: vesin_t
+
+     ! options
+     type( VesinOptions ), private :: opts
+
+     !! error message
+     character(:), allocatable, public :: errmsg
+
+     !! number of elements in the neighbor list
+     integer, public :: length
+
+     !! Array of pairs (storing the indices of the first and second point in the
+     !! pair), containing `length` elements.
+     integer,  allocatable, public :: pairs(:,:)
+
+     !! Array of box shifts, one for each `pair`. This is only set if
+     !! `return_pairs` option was `true` during the calculation.
+     integer,  allocatable, public :: shifts(:,:)
+
+     !! Array of pair distance (i.e. distance between the two points), one for
+     !! each pair. This is only set if `return_distances` option was `true`
+     !! during the calculation.
+     real(rp), allocatable, public :: distances(:)
+
+     !! Array of pair vector (i.e. vector between the two points), one for
+     !! each pair. This is only set if `return_vectors` option was `true`
+     !! during the calculation.
+     real(rp), allocatable, public :: vectors(:,:)
+
+   contains
+     procedure, public :: compute => vesin_t_compute
+     final :: vesin_t_destroy
+  end type vesin_t
+
+  ! overload name
+  interface vesin_t
+     procedure vesin_set_options
+  end interface vesin_t
+
+
 contains
 
-
-  function vesin_compute( nat, pos, box, vesin_opts, vesin_neighbors, errmsg, fneigh )result(ierr)
+  function vesin_set_options( &
+       cutoff, &
+       full, &
+       sorted, &
+       return_shifts, &
+       return_distances, &
+       return_vectors )result(self)
+    !> @details
+    !! Construct and set the options for `vesin_t`. This directly sets values to the private
+    !! member `vesin_t% opts`, which is a `type( VesinOptions )` instance, used in the
+    !! calculation of the neighbor list.
     !!
+    !! @param `cutoff`, real ::  Spherical cutoff, only pairs below this cutoff will be included. Default=0.0
+    !! @param `full`, logical, optional :: Should the returned neighbor list be a full
+    !!       list (include both `i -> j` and `j -> i` pairs) or a half
+    !!       list (include only `i -> j`)? Default=.false.
+    !! @param `sorted`, logical, optional :: Should the neighbor list be sorted? If yes,
+    !!       the returned pairs will be sorted using lexicographic order. Default=.true.
+    !! @param `return_shifts`, logical, optional :: Should `vesin_t` contain `shifts`? Default=.false.
+    !! @param `return_distances`, logical, optional :: Should `vesin_t` contain `distances`? Default=.false.
+    !! @param `return_vectors`, logical, optional :: Should `vesin_t` contain `vectors`? Default=.false.
     !!
     implicit none
-    integer( c_int ), intent(in) :: nat
-    real( c_double ), intent(in) :: pos(3,nat)
-    real( c_double ), intent(in) :: box(3,3)
-    type( VesinOptions ), intent(in) :: vesin_opts
-    type( VesinNeighborList ), intent(out) :: vesin_neighbors
-    character(:), allocatable, intent(out) :: errmsg
-    integer( c_int ) :: ierr
+    real( rp ), intent(in) :: cutoff
+    logical, intent(in), optional :: full
+    logical, intent(in), optional :: sorted
+    logical, intent(in), optional :: return_shifts
+    logical, intent(in), optional :: return_distances
+    logical, intent(in), optional :: return_vectors
+    type( vesin_t ), pointer :: self
 
-    logical( c_bool ) :: periodic
+    allocate( vesin_t :: self )
 
-    integer( c_size_t ) :: c_nat
+    self% opts% cutoff = real( cutoff, c_double )
+    if(present(full)            ) self% opts% full = logical( full, c_bool )
+    if(present(sorted)          ) self% opts% sorted = logical( sorted, c_bool )
+    if(present(return_shifts)   ) self% opts% return_shifts = logical( return_shifts, c_bool )
+    if(present(return_distances)) self% opts% return_distances = logical( return_distances, c_bool )
+    if(present(return_vectors)  ) self% opts% return_vectors = logical( return_vectors, c_bool )
 
+  end function vesin_set_options
+
+
+  function vesin_t_compute( self, nat, pos, box, periodic )result(ierr)
+    !> @details
+    !! Compute the neighbor list with options provided in `vesin_t% opts`.
+    !! The data is recorded first in C format in `type(VesinNeighborList)`, then it is
+    !! transferred to fortran format into `self`. The C data is destroyed at the end
+    !! of this function.
+    !!
+    !! @param `nat`, integer :: number of atoms
+    !! @param `pos`, real(rp), [3,nat] :: atomic positions
+    !! @param `box`, real(rp), [3,3] :: periodic box vectors
+    !! @param `periodic`, logical, optional :: flag for (non)-periodic calculation. Default=.true.
+    implicit none
+    class( vesin_t ), intent(inout) :: self
+    integer, intent(in)  :: nat
+    real(rp), intent(in) :: pos(3,nat)
+    real(rp), intent(in) :: box(3,3)
+    logical, intent(in), optional :: periodic
+    integer :: ierr
+
+    type( VesinNeighborList ) :: cdata
     logical( c_bool ) :: c_periodic
-    type( c_ptr ) :: c_error_message
-    integer(c_int) :: dev
-    type( f_VesinNeighborList ), intent(out) :: fneigh
-    integer :: n
-
-    c_nat = int( nat, c_size_t )
-
-    ! c_periodic = .false.
-    c_periodic = .true.
-
-
-    ! set cpu device
-    dev = VesinCPU
-    vesin_neighbors% device = VesinCPU
-
-    ierr = fvesin_neighbors( &
-         pos,            &
-         c_nat,          &
-         box,            &
-         c_periodic,     &
-         dev,            &
-         vesin_opts,         &
-         vesin_neighbors,    &
-         c_error_message )
-
-    if( int(ierr) /= 0 ) errmsg = c2f_string(c_error_message)
-
-    ! allocate(fneigh)
-    ! n = vesin_neighbors% length
-    ! fneigh%length = n
-    ! call c_f_pointer( vesin_neighbors%pairs, fneigh%pairs, shape=[2,n] )
-    fneigh = assign_c2f( vesin_neighbors )
-
-  end function vesin_compute
-
-  subroutine vesin_free( neighbors )
-    !! 
-    implicit none
-    type( VesinNeighborList ), intent(inout) :: neighbors
-    call fvesin_free( neighbors )
-  end subroutine vesin_free
-
-
-  subroutine f_VesinNeighborList_destroy( self )
-    !! destructor for `type( f_VesinNeighborList )`
-    implicit none
-    class( f_VesinNeighborList ), intent(inout) :: self
-    if( allocated( self% pairs ) )     deallocate( self% pairs )
-    if( allocated( self% shifts ) )    deallocate( self% shifts )
-    if( allocated( self% distances ) ) deallocate( self% distances )
-    if( allocated( self% vectors ) )   deallocate( self% vectors )
-  end subroutine f_VesinNeighborList_destroy
-
-
-  function assign_c2f( c )result(f)
-    !! shift the memory allocation from the C struc `VesinNeighborList` where data is
-    !! declared as `type(c_ptr)`, to the fortran derived type `f_VesinNeighborList`,
-    !! which contains fortran-allocated data in C precision.
-    !!
-    !! After this operation, the C struc `VesinNeighborList` can be `free`d
-    !! without loss of memory for the fortran type.
-    implicit none
-    type( VesinNeighborList ), intent(in) :: c
-    type( f_VesinNeighborList ) :: f
+    integer( c_size_t ) :: c_nat
+    real( c_double ) :: c_pos(3,nat), c_box(3,3)
+    integer( c_int ) :: dev
+    type( c_ptr ) :: c_errmsg
 
     integer :: n
     integer( c_size_t ), pointer :: pairs(:,:) => null()
@@ -303,29 +332,67 @@ contains
     real(c_double ), pointer :: distances(:) => null()
     real( c_double ), pointer :: vectors(:,:) => null()
 
-    f% length = c% length
-    n = int( f%length, kind(n) )
+    ! perform periodic calc by default
+    c_periodic = .true.
+    if(present(periodic)) c_periodic=logical(periodic, c_bool)
+
+    ! input data to C
+    c_nat = int( nat, c_size_t )
+    c_pos = real( pos, c_double )
+    c_box = real( box, c_double )
+    dev = VesinCPU
+    cdata% device = VesinCPU
+
+    ! compute the neighbor list
+    ierr = int( fvesin_neighbors(c_pos, c_nat, c_box, c_periodic, dev, self%opts, cdata, c_errmsg ))
+    if( ierr/= 0 ) then
+       self% errmsg = c2f_string( c_errmsg )
+       return
+    end if
+
+    ! transform cdata to fdata
+    self%length = int(cdata%length, kind(self%length))
+    n = int( cdata%length )
     ! pairs
-    if( c_associated(c%pairs)) then
-       call c_f_pointer( c%pairs, pairs, shape=[2,n])
-       allocate( f%pairs, source=pairs )
+    if( c_associated(cdata%pairs)) then
+       call c_f_pointer( cdata%pairs, pairs, shape=[2,n] )
+       allocate( self%pairs, source=int(pairs, kind(self%pairs)) )
     end if
     ! shifts
-    if( c_associated(c%shifts)) then
-       call c_f_pointer( c%shifts, shifts, shape=[3,n])
-       allocate( f%shifts, source=shifts )
+    if( c_associated(cdata%shifts)) then
+       call c_f_pointer( cdata%shifts, shifts, shape=[3,n])
+       allocate( self%shifts, source=int(shifts, kind(self%shifts)) )
     end if
     ! distances
-    if( c_associated(c%distances)) then
-       call c_f_pointer( c%distances, distances, shape=[n] )
-       allocate( f%distances, source=distances )
+    if( c_associated(cdata%distances)) then
+       call c_f_pointer( cdata%distances, distances, shape=[n] )
+       allocate( self%distances, source=real(distances,kind(self%distances)) )
     end if
     ! vectors
-    if( c_associated(c%vectors))then
-       call c_f_pointer( c%vectors, vectors, shape=[3,n])
-       allocate( f%vectors, source=vectors )
+    if( c_associated(cdata%vectors))then
+       call c_f_pointer( cdata%vectors, vectors, shape=[3,n])
+       allocate( self%vectors, source=real(vectors, kind(self%vectors)) )
     end if
-  end function assign_c2f
+    ! now can free cdata
+    call vesin_free(cdata)
+
+  end function vesin_t_compute
+
+  subroutine vesin_free( neighbors )
+    implicit none
+    type( VesinNeighborList ), intent(inout) :: neighbors
+    call fvesin_free( neighbors )
+  end subroutine vesin_free
+
+  subroutine vesin_t_destroy( self )
+    !! destructor
+    implicit none
+    type( vesin_t ), intent(inout) :: self
+    if( allocated( self%pairs)) deallocate( self%pairs )
+    if( allocated( self%shifts)) deallocate( self%shifts )
+    if( allocated( self%distances)) deallocate( self%distances )
+    if( allocated( self%vectors)) deallocate( self%vectors )
+  end subroutine vesin_t_destroy
 
 
   function c2f_string(ptr) result(f_string)
@@ -355,4 +422,5 @@ contains
     end if
   end function c2f_string
 
-end module f_vesin
+
+end module f_vesin_wrapper

@@ -1,19 +1,15 @@
 program main
-  use f_vesin
-  use, intrinsic :: iso_c_binding
+  use f_vesin_wrapper
   implicit none
   integer :: nat
   integer, allocatable :: typ(:)
-  real(c_double), allocatable :: pos(:,:)
-  real(c_double) :: lat(3,3)
+  real(rp), allocatable :: pos(:,:)
+  real(rp) :: lat(3,3)
   integer :: i
   character(len=256) :: line
   integer :: n_begin, n_end
   integer :: ierr
-  character(:), allocatable :: errmsg
-  type( VesinOptions ) :: options
-  type( VesinNeighborList ) :: neigh
-  type( f_VesinNeighborList ) :: fneigh
+  type( vesin_t ), pointer :: neigh
 
   read(*,*) nat
   read(*,'(a256)') line
@@ -28,23 +24,11 @@ program main
      read(*,*) typ(i), pos(:,i)
   end do
 
-  options% cutoff = 4.2_c_double
-  options% full = .true.
-  options% sorted = .true.
-  options% return_vectors = .true.
-  ierr = vesin_compute( nat, pos, lat, options, neigh, errmsg, fneigh )
-  if( ierr /= 0 ) then
-     write(*,*) errmsg
-  end if
-  call vesin_free( neigh )
+  neigh => vesin_t( cutoff=4.2_rp, full=.true., return_vectors=.true. )
+  ierr = neigh% compute( nat, pos, lat )
+  if( ierr /= 0 ) write(*,*) neigh% errmsg
 
-  write(*,*) "n pairs:", fneigh% length
-
-  do i = 1, fneigh% length
-     write(*,*) fneigh% pairs(:,i), fneigh% vectors(:,i)
-  end do
-
-
-  call fneigh% destroy()
+  write(*,*) neigh% length
+  deallocate( neigh )
   deallocate( typ, pos )
 end program main
