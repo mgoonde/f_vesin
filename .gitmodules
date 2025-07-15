@@ -1,0 +1,3 @@
+[submodule "vesin"]
+	path = vesin
+	url = git@github.com:mgoonde/vesin.git
