@@ -1,15 +1,17 @@
 program main
-  use f_vesin_wrapper
+  use m_neighbour
   implicit none
   integer :: nat
   integer, allocatable :: typ(:)
   real(rp), allocatable :: pos(:,:)
   real(rp) :: lat(3,3)
-  integer :: i
+  integer :: i, n
   character(len=256) :: line
   integer :: n_begin, n_end
   integer :: ierr
-  type( vesin_t ), pointer :: neigh
+  type( t_neighbour ) :: neigh
+  integer, allocatable :: neigh_ityp(:)
+  real(rp), allocatable :: neigh_coords(:,:)
 
   read(*,*) nat
   read(*,'(a256)') line
@@ -24,11 +26,32 @@ program main
      read(*,*) typ(i), pos(:,i)
   end do
 
-  neigh => vesin_t( cutoff=4.2_rp, full=.true., return_vectors=.true. )
-  ierr = neigh% compute( nat, pos, lat )
-  if( ierr /= 0 ) write(*,*) neigh% errmsg
+  ! initialize
+  neigh = t_neighbour()
 
-  write(*,*) neigh% length
-  deallocate( neigh )
+  ! compute neighbor list
+  ierr = neigh% compute( nat, typ, pos, lat, 3.3_rp )
+  if( ierr /= 0 ) then
+     write(*,*) neigh% errmsg
+     error stop
+  end if
+
+
+  ! retrieve neighbor data fo some index
+  n = neigh% get( 2, nbond=3, ityplist=neigh_ityp, veclist=neigh_coords, include_idx=.true. )
+  if( n .lt. 0 ) then
+     write(*,*) neigh% errmsg
+     error stop
+  end if
+
+
+  write(*,*) n
+  write(*,*)
+  do i = 1, n
+     write(*,*) neigh_ityp(i), neigh_coords(:,i)
+  end do
+
+  call neigh% destroy()
   deallocate( typ, pos )
+  deallocate( neigh_ityp, neigh_coords )
 end program main
