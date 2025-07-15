@@ -22,7 +22,7 @@ o_neigh = $(OBJ)/m_neighbour.o
 
 all: obj test
 
-obj: vesin $(OBJ) $(MOD) $(o_neigh)
+obj: submod vesin $(OBJ) $(MOD) $(o_neigh)
 test: obj $(x_main)
 
 #
@@ -41,6 +41,9 @@ $(VESIN_BUILD):
 #
 vesin: ${VESIN_BUILD}
 	@cd ${VESIN_BUILD} && cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
+submod:
+	@if test ! -d $(VESIN_PATH)/vesin; then \
+	git submodule update --init --recursive; fi
 
 #
 # object

@@ -5,8 +5,6 @@ A slightly more sophisticated fortran wrapper to `vesin` from: https://github.co
 # compile
 
 ```bash
-git clone git@github.com:mgoonde/f_vesin.git
-git submodule update --init
 make
 ```
 
