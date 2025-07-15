@@ -18,5 +18,6 @@ make clean
 # run
 
 ```bash
+cd test
 ./main.x < xx.xyz
 ```
