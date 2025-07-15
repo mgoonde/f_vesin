@@ -1,36 +1,57 @@
 program main
-  use f_vesin_wrapper, only: vesin_t, rp
+  use m_neighbour
   implicit none
-  type( vesin_t ), pointer :: neigh
-  integer, parameter :: nat=2
-  real(rp) :: pos(3,nat)
-  real(rp) :: box(3,3)
+  integer :: nat
+  integer, allocatable :: typ(:)
+  real(rp), allocatable :: pos(:,:)
+  real(rp) :: lat(3,3)
+  integer :: i, n
+  character(len=256) :: line
+  integer :: n_begin, n_end
   integer :: ierr
+  type( t_neighbour ) :: neigh
+  integer, allocatable :: neigh_ityp(:)
+  real(rp), allocatable :: neigh_coords(:,:)
 
-  ! positions
-  pos(:,1) = [ 0.0_rp, 0.0_rp, 0.0_rp ]
-  pos(:,2) = [ 0.0_rp, 1.3_rp, 1.3_rp ]
+  read(*,*) nat
+  read(*,'(a256)') line
+  n_begin = index(line, "Lattice=") + 9
+  line = line(n_begin:)
+  n_end = index(line,'"')-1
+  line = line(:n_end)
+  read(line, *) lat
+  allocate( typ(1:nat) )
+  allocate( pos(1:3,1:nat))
+  do i = 1, nat
+     read(*,*) typ(i), pos(:,i)
+  end do
 
-  ! lattice
-  box(:,1) = [ 3.2_rp, 0.0_rp, 0.0_rp ]
-  box(:,2) = [ 0.0_rp, 3.2_rp, 0.0_rp ]
-  box(:,3) = [ 0.0_rp, 0.0_rp, 3.2_rp ]
+  ! initialize
+  neigh = t_neighbour()
 
-  ! create the instance, set options
-  neigh => vesin_t( cutoff=4.2_rp, full=.true., return_shifts=.true., return_distances=.true. )
-
-  ! launch computation of neighbor list
-  ierr = neigh% compute( nat, pos, box )
-  if( ierr/= 0 ) then
+  ! compute neighbor list
+  ierr = neigh% compute( nat, typ, pos, lat, 3.3_rp )
+  if( ierr /= 0 ) then
      write(*,*) neigh% errmsg
-     stop
+     error stop
   end if
 
-  ! data is inside `neigh`:
-  write(*,*) "got length:", neigh% length
 
-  ! destroy data
-  deallocate( neigh )
+  ! retrieve neighbor data fo some index
+  n = neigh% get( 2, nbond=3, ityplist=neigh_ityp, veclist=neigh_coords, include_idx=.true. )
+  if( n .lt. 0 ) then
+     write(*,*) neigh% errmsg
+     error stop
+  end if
 
+
+  write(*,*) n
+  write(*,*)
+  do i = 1, n
+     write(*,*) neigh_ityp(i), neigh_coords(:,i)
+  end do
+
+  call neigh% destroy()
+  deallocate( typ, pos )
+  deallocate( neigh_ityp, neigh_coords )
 end program main
-

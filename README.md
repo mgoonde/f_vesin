@@ -1,19 +1,22 @@
-# fortran bindings to vesin
-from: https://github.com/Luthaf/vesin
+# fortran wrapper to vesin
+
+A slightly more sophisticated fortran wrapper to `vesin` from: https://github.com/Luthaf/vesin
 
 # compile
 
+Edit the ``VESIN_PATH`` in ``Makefile``, then:
+
 ```bash
-sh compile.sh
+make
 ```
 
 clean
 ```bash
-sh clean.sh
+make clean
 ```
 
 # run
 
 ```bash
-./main.x
+./main.x < xx.xyz
 ```

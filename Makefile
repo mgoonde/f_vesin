@@ -1,22 +1,27 @@
 FC = gfortran
 FFLAGS := -g
 
-VESIN_PATH := /home/mgunde/vesin2
-VESIN_BUILD := ${VESIN_PATH}/build
+VESIN_PATH     := $(HOME)/vesin2
+VESIN_BUILD    := ${VESIN_PATH}/build
+VESIN_LIBPATH  := ${VESIN_BUILD}/lib
 VESIN_FINCLUDE := ${VESIN_PATH}/fortran/include
 
 SRC := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-OBJ=$(SRC)/Obj
-MOD=$(SRC)/mod
+OBJ := $(SRC)/Obj
+MOD := $(SRC)/mod
 
 
-f_main = main.f90
-x_main = main.x
+f_main = $(SRC)/test/main.f90
+x_main = $(SRC)/test/main.x
 
 f_neigh = $(SRC)/m_neighbour.f90
 o_neigh = $(OBJ)/m_neighbour.o
 
-all: $(OBJ) $(MOD) $(x_main)
+
+all: obj test
+
+obj: $(OBJ) $(MOD) $(o_neigh)
+test: obj $(x_main)
 
 #
 # directories
@@ -36,8 +41,8 @@ $(o_neigh): $(f_neigh)
 #
 # main prog
 #
-$(x_main): $(o_neigh) $(f_main)
-	$(FC) $(FFLAGS) -I$(VESIN_FINCLUDE) -I$(MOD) -o $@ $^ -L$(VESIN_BUILD)/lib -lvesin -lstdc++
+$(x_main): $(f_main) $(o_neigh)
+	$(FC) $(FFLAGS) -I$(MOD) -o $@ $^ -L$(VESIN_LIBPATH) -lvesin -lstdc++
 
 
 clean:
