@@ -4,7 +4,6 @@ A slightly more sophisticated fortran wrapper to `vesin` from: https://github.co
 
 # compile
 
-Edit the ``VESIN_PATH`` in ``Makefile``, then:
 
 ```bash
 make
