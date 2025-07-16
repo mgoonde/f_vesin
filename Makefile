@@ -9,6 +9,7 @@ MOD := $(SRC)/mod
 VESIN_PATH     := $(SRC)/vesin
 VESIN_BUILD    := ${VESIN_PATH}/build
 VESIN_LIBPATH  := ${VESIN_BUILD}/lib
+VESIN_FBUILD   := ${VESIN_PATH}/fortran/build
 VESIN_FINCLUDE := ${VESIN_PATH}/fortran/include
 
 
@@ -34,13 +35,19 @@ $(MOD):
 	@if [ ! -d $(MOD) ]; then mkdir $(MOD) ; fi
 $(VESIN_BUILD):
 	@if [ ! -d $(VESIN_BUILD) ]; then mkdir $(VESIN_BUILD) ; fi
+${VESIN_FBUILD}:
+	@if [ ! -d ${VESIN_FBUILD} ]; then mkdir ${VESIN_FBUILD} ; fi
 
 
 #
 # vesin
 #
-vesin: ${VESIN_BUILD}
-	@cd ${VESIN_BUILD} && cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
+vesin: ${VESIN_BUILD} ${VESIN_FBUILD}
+	@cd ${VESIN_BUILD} && \
+	cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
+	@cd ${VESIN_FBUILD} && \
+	cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
+
 submod:
 	@if test ! -d $(VESIN_PATH)/vesin; then \
 	git submodule update --init --recursive; fi
@@ -60,4 +67,4 @@ $(x_main): $(f_main) $(o_neigh)
 
 
 clean:
-	rm -rf $(OBJ) $(MOD) $(x_main) $(VESIN_BUILD)
+	rm -rf $(OBJ) $(MOD) $(x_main) $(VESIN_BUILD) ${VESIN_FBUILD}
