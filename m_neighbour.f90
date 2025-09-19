@@ -92,11 +92,9 @@ module m_neighbour
      real( c_double ), pointer :: distances(:) => null()    !< shape[length]
      real( c_double ), pointer :: vectors(:,:) => null()    !< shape[3, length]
 
-     ! local
+     ! local, private
      integer, allocatable :: cumsum(:) !< cumulative sum of nneig
-     ! real(rp) :: lat(3,3) !< lattice for knowing the shifts in expand
      integer, allocatable :: ityp(:) !< copy of ityp
-
 
 
      ! ----- public ------
@@ -109,7 +107,7 @@ module m_neighbour
      procedure, public :: get     => t_neighbour_get
      procedure, public :: expand  => t_neighbour_expand
      procedure, public :: cluster => t_neighbour_cluster
-     ! procedure, public :: get_by_rcut
+     procedure, public :: get_by_rcut => t_neighbour_get_by_rcut
      ! final :: t_neighbour_destroy
      procedure, public :: destroy => t_neighbour_destroy
   end type t_neighbour
@@ -386,7 +384,7 @@ contains
 
   function t_neighbour_get_nn( self, idx, list, ityplist, veclist, shiftslist, include_idx )result(n)
     !! Get the first neighbor shell of `idx` from neighbour list.
-    !! Return `n` which is the number of neighbors.
+    !! Return `n` which is the number of neighbors, or negative on error.
     !! The vector of atom `idx` is NOT included in output by default.
     implicit none
     class( t_neighbour ), intent(inout) :: self
@@ -524,7 +522,7 @@ contains
     !> array of shifts
     integer, allocatable, intent(inout), optional :: shiftslist(:,:)
 
-    !> number of elements in output list
+    !> number of elements in output list, negative on error
     integer :: n
     !
     integer :: i, ntot, ncur, idx, iatm, nprev, nat
@@ -720,7 +718,8 @@ contains
     integer, allocatable, intent(inout) :: list(:)
 
     !> Number of atoms in output cluster.
-    !! If `idx` is not present in `list`, return zero
+    !! If `idx` is not present in `list`, return zero.
+    !! Negative on error
     integer :: n
 
     integer, allocatable :: work(:), nn(:)
@@ -788,6 +787,145 @@ contains
   end function t_neighbour_cluster
 
 
+  function t_neighbour_get_by_rcut( self, idx, rcut, nat, ityp, pos, lat, &
+       list, ityplist, veclist, shiftslist, include_idx ) result(n)
+    !! get neighbor list of specific index atom, within specified atomic system,
+    !! and with a cutoff different from the one in `self`.
+    implicit none
+    class( t_neighbour ), intent(inout) :: self
+
+    !> input atomic index
+    integer, intent(in)                 :: idx
+
+    !> custom rcut
+    real(rp), intent(in) :: rcut
+
+    !> number of atoms
+    integer, intent(in) :: nat
+
+    !> atomic types
+    integer, intent(in) :: ityp(nat)
+
+    !> atomic positions
+    real(rp), intent(in) :: pos(3,nat)
+
+    !> lattice: lat(:,1)=v1, lat(:,2)=v2, lat(:,3)=v3
+    real(rp), intent(in) :: lat(3,3)
+
+    !> output list of neighbours to atom `idx`
+    integer, allocatable, intent(out), optional  :: list(:)
+
+    !> output list of atomic types neighbor to `idx`
+    integer, allocatable, intent(out), optional :: ityplist(:)
+
+    !> output list of vectors neighbour to `idx`
+    real(rp), allocatable, intent(out), optional :: veclist(:,:)
+
+    !> output list of box shifts for each neighbor
+    integer, allocatable, intent(out), optional :: shiftslist(:,:)
+
+    !> flag to include the atom `idx` in output. If .true., it will be on the first
+    !! element of output. Default=.false.
+    logical, intent(in), optional :: include_idx
+
+    !> output number of neighbours, or negative on error
+    integer :: n
+
+    logical :: inc_idx
+    real(rp) :: invlat(3,3)
+    integer :: nbox(3)
+    integer :: i, j, ii, jj, kk, n_cur, nmax
+    real(rp) :: rshift(3), rij(3), ri(3), rj(3)
+    integer, allocatable :: slist(:,:)
+    integer, allocatable :: tmp(:)
+    real(rp), allocatable :: vlist(:,:)
+    real(rp) :: dist2, rcut2
+
+    if( idx < 0 .or. idx > nat ) then
+       n = -1
+       self%errmsg="get_by_rcut:: `idx` out of bounds in input."
+       return
+    end if
+
+    inc_idx = .false.
+    if( present(include_idx) ) inc_idx=include_idx
+
+    ! inverse lattice
+    call inverse( lat, invlat )
+
+    ! most brute-force algo for single atom.
+
+    ! how many boxes to add in each direction
+    ! this counts as from -nbox to +nbox
+    do i = 1, 3
+       nbox(i) = nint( rcut*norm2(invlat(:,i)) )
+    end do
+    ! write(*,*) "rcut",rcut
+    ! write(*,*) "nbox:",nbox
+
+    rcut2 = rcut*rcut
+
+    n_cur = 0
+    ! absolute maximal number of atoms: use for alloc size
+    nmax = product(2*nbox+1)*nat
+    allocate(tmp(1:nmax))
+    allocate(vlist(1:3, 1:nmax))
+    allocate(slist(1:3, 1:nmax))
+    ! include origin idx on first place
+    if( inc_idx ) then
+       n_cur = n_cur + 1
+       tmp( n_cur ) = idx
+       vlist(:, n_cur) = [0.0_rp, 0.0_rp, 0.0_rp]
+       slist(:, n_cur) = [0, 0, 0]
+    end if
+
+    ! my pos
+    ri = pos(:,idx)
+    do j = 1, nat
+       rj = pos(:,j)
+       ! for all box shifts
+       do ii = -nbox(1), nbox(1)
+          do jj = -nbox(2), nbox(2)
+             do kk = -nbox(3), nbox(3)
+                ! skip self in the same box
+                if( ii==0 .and. jj==0 .and. kk==0 .and. j==idx ) cycle
+                ! shift (in crist coords)
+                rshift = [real(ii,rp), real(jj,rp), real(kk,rp)]
+                ! shift in cartesian
+                rshift = matmul( lat, rshift )
+                rij = rj+rshift - ri
+                dist2 = dot_product(rij, rij)
+                if( dist2 <= rcut2 ) then
+                   ! add j
+                   n_cur = n_cur + 1
+                   if( n_cur .gt. nmax ) error stop "n_cur exceeds nmax..! should not happen"
+                   tmp( n_cur ) = j
+                   vlist(:, n_cur ) = rij
+                   slist(:, n_cur ) = [ii, jj, kk]
+                   ! write(*,*) ii, jj, kk, j, dist2
+                end if
+             end do
+          end do
+       end do
+    end do
+
+    ! set output
+    n = n_cur
+    if( present(list)) allocate(list, source=tmp)
+    if( present(veclist)) allocate(veclist, source=vlist(1:3,1:n))
+    if( present(shiftslist))allocate(shiftslist, source=slist(1:3,1:n))
+    if( present(ityplist)) then
+       allocate( ityplist(1:n) )
+       do i = 1, n
+          ityplist(i) = ityp( tmp(i) )
+       end do
+    end if
+
+
+    ! write(*,"(10i4)") tmp
+  end function t_neighbour_get_by_rcut
+
+
   ! transform `type(c_ptr)` string to fortran `character(:),allocatable` string
   function c2f_string(ptr) result(f_string)
     implicit none
@@ -815,5 +953,76 @@ contains
        end do
     end if
   end function c2f_string
+
+
+  pure subroutine inverse( mat, inv )
+    !! inverse of 3x3 matrix
+    implicit none
+    real(rp), intent(in) :: mat(3,3)
+    real(rp), intent(out) :: inv(3,3)
+
+    real(rp) :: det, invdet
+
+    ! calculate the determinant
+    det =  mat(1,1)*mat(2,2)*mat(3,3) &
+         + mat(1,2)*mat(2,3)*mat(3,1) &
+         + mat(1,3)*mat(2,1)*mat(3,2) &
+         - mat(1,3)*mat(2,2)*mat(3,1) &
+         - mat(1,2)*mat(2,1)*mat(3,3) &
+         - mat(1,1)*mat(2,3)*mat(3,2)
+    ! invert the determinant
+    invdet = 1.0_rp/det
+    ! calculate the inverse matrix
+    inv(1,1) = invdet  * ( mat(2,2)*mat(3,3) - mat(2,3)*mat(3,2) )
+    inv(2,1) = -invdet * ( mat(2,1)*mat(3,3) - mat(2,3)*mat(3,1) )
+    inv(3,1) = invdet  * ( mat(2,1)*mat(3,2) - mat(2,2)*mat(3,1) )
+    inv(1,2) = -invdet * ( mat(1,2)*mat(3,3) - mat(1,3)*mat(3,2) )
+    inv(2,2) = invdet  * ( mat(1,1)*mat(3,3) - mat(1,3)*mat(3,1) )
+    inv(3,2) = -invdet * ( mat(1,1)*mat(3,2) - mat(1,2)*mat(3,1) )
+    inv(1,3) = invdet  * ( mat(1,2)*mat(2,3) - mat(1,3)*mat(2,2) )
+    inv(2,3) = -invdet * ( mat(1,1)*mat(2,3) - mat(1,3)*mat(2,1) )
+    inv(3,3) = invdet  * ( mat(1,1)*mat(2,2) - mat(1,2)*mat(2,1) )
+  end subroutine inverse
+
+  pure elemental subroutine periodic(c)
+    ! periodic boundary condition, for any dimensional vector input in crist coords.
+    implicit none
+    real(RP), intent(inout) :: c
+
+    if( c .lt. -0.5_rp ) c = c + 1.0_rp
+    if( c .ge. 0.5_rp  ) c = c - 1.0_rp
+  end subroutine periodic
+
+  pure subroutine crist_to_cart( rij, lat, invlat )
+    ! lat is lattice vectors as:
+    !
+    !  lat(:,1) = a1 a2 a3
+    !  lat(:,2) = b1 b2 b3
+    !  lat(:,3) = c1 c2 c3
+    !
+    ! invlat is inverse of lat
+    implicit none
+    real(rp), intent(inout) :: rij(:)
+    real(rp), intent(in) :: lat(size(rij), size(rij))
+    real(rp), intent(in) :: invlat(size(rij), size(rij))
+
+    rij = matmul( lat, rij )
+  end subroutine crist_to_cart
+
+  pure subroutine cart_to_crist( rij, lat, invlat )
+    ! lat is lattice vectors as:
+    !
+    !  lat(:,1) = a1 a2 a3
+    !  lat(:,2) = b1 b2 b3
+    !  lat(:,3) = c1 c2 c3
+    !
+    ! invlat is inverse of lat
+    implicit none
+    real(rp), intent(inout) :: rij(:)
+    real(rp), intent(in) :: lat(size(rij), size(rij))
+    real(rp), intent(in) :: invlat(size(rij), size(rij))
+
+    rij = matmul( invlat, rij )
+  end subroutine cart_to_crist
 
 end module m_neighbour
