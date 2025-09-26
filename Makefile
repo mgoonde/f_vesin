@@ -8,9 +8,8 @@ MOD := $(SRC)/mod
 
 VESIN_PATH     := $(SRC)/vesin
 VESIN_BUILD    := ${VESIN_PATH}/build
-VESIN_LIBPATH  := ${VESIN_BUILD}/lib
-VESIN_FBUILD   := ${VESIN_PATH}/fortran/build
-VESIN_FINCLUDE := ${VESIN_PATH}/fortran/include
+VESIN_LIBPATH  := ${VESIN_PATH}/lib
+VESIN_INCLUDE  := ${VESIN_BUILD}/fortran/include
 
 
 
@@ -33,20 +32,15 @@ $(OBJ):
 	@if [ ! -d $(OBJ) ]; then mkdir $(OBJ) ; fi
 $(MOD):
 	@if [ ! -d $(MOD) ]; then mkdir $(MOD) ; fi
-$(VESIN_BUILD):
-	@if [ ! -d $(VESIN_BUILD) ]; then mkdir $(VESIN_BUILD) ; fi
-${VESIN_FBUILD}:
-	@if [ ! -d ${VESIN_FBUILD} ]; then mkdir ${VESIN_FBUILD} ; fi
 
 
 #
 # vesin
 #
-vesin: ${VESIN_BUILD} ${VESIN_FBUILD}
-	@cd ${VESIN_BUILD} && \
-	cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
-	@cd ${VESIN_FBUILD} && \
-	cmake -DCMAKE_INSTALL_PREFIX=./ .. && cmake --build . && cmake --install .
+vesin: submod
+	@cd ${VESIN_PATH} && cmake -B ${VESIN_BUILD} -DVESIN_FORTRAN=ON -DCMAKE_INSTALL_PREFIX=./
+	@cd ${VESIN_PATH} && cmake --build ${VESIN_BUILD}
+	@cd ${VESIN_PATH} && cmake --install ${VESIN_BUILD}
 
 submod:
 	@if test ! -d $(VESIN_PATH)/vesin; then \
@@ -56,7 +50,7 @@ submod:
 # object
 #
 $(o_neigh): $(f_neigh)
-	$(FC) $(FFLAGS) -J$(MOD) -I$(VESIN_FINCLUDE) -c $^ -o $@
+	$(FC) $(FFLAGS) -J$(MOD) -I$(VESIN_INCLUDE) -c $^ -o $@
 
 
 #
@@ -67,4 +61,4 @@ $(x_main): $(f_main) $(o_neigh)
 
 
 clean:
-	rm -rf $(OBJ) $(MOD) $(x_main) $(VESIN_BUILD) ${VESIN_FBUILD}
+	rm -rf $(OBJ) $(MOD) $(x_main) $(VESIN_BUILD) ${VESIN_LIBPATH} ${VESIN_INCLUDE}

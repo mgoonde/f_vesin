@@ -3,7 +3,7 @@ module m_neighbour
   use, intrinsic :: iso_c_binding
 
   ! import the C-interoperable vesin interface
-  use vesin, only: &
+  use vesin_c, only: &
        c_VesinOptions => VesinOptions, &
        c_VesinNeighborList => VesinNeighborList, &
        c_vesin_neighbors => vesin_neighbors, &

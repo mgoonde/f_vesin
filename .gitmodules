@@ -1,0 +1,3 @@
+[submodule "vesin"]
+	path = vesin
+	url = https://github.com/Luthaf/vesin
