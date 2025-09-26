@@ -841,7 +841,7 @@ contains
     real(rp), allocatable :: vlist(:,:)
     real(rp) :: dist2, rcut2
 
-    if( idx < 0 .or. idx > nat ) then
+    if( idx < 1 .or. idx > nat ) then
        n = -1
        self%errmsg="get_by_rcut:: `idx` out of bounds in input."
        return
