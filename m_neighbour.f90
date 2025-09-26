@@ -84,7 +84,8 @@ module m_neighbour
      type( c_vesinOptions ) :: opts       !< Computation options
      type( c_vesinNeighborList ) :: cdata !< Returned C data
      integer :: device = VesinCPU
-     logical :: active = .false.          !< .true. when initialized
+     logical :: initialized = .false.          !< .true. when initialized
+     logical :: active = .false.          !< .true. when it contains data
      ! pointers to C data, in C precision
      integer(c_size_t) :: length = 0_c_size_t               !< size of the list
      integer( c_size_t ), pointer :: pairs(:,:) => null()   !< shape[2, length]
@@ -108,6 +109,7 @@ module m_neighbour
      procedure, public :: expand  => t_neighbour_expand
      procedure, public :: cluster => t_neighbour_cluster
      procedure, public :: get_by_rcut => t_neighbour_get_by_rcut
+     procedure, public :: deactivate => t_neighbour_deactivate
      ! final :: t_neighbour_destroy
      procedure, public :: destroy => t_neighbour_destroy
   end type t_neighbour
@@ -145,14 +147,26 @@ contains
     self%opts% return_vectors   = .true.
     if( present(return_distances)) self%opts% return_distances = return_distances
 
-    ! set as active
-    self% active = .true.
+    ! set as initialized
+    self% initialized = .true.
 
   end function t_neighbour_construct
 
 
   subroutine t_neighbour_destroy( self )
-    !! destroy the `t_neighbour` instance
+    !! destroy the `t_neighbour` instance:
+    !! deactivate and free underlying C data
+    implicit none
+    ! type( t_neighbour ), intent(inout) :: self
+    class( t_neighbour ), intent(inout) :: self
+    call self% deactivate()
+    self% initialized = .false.
+    call c_vesin_free(self%cdata)
+  end subroutine t_neighbour_destroy
+
+  subroutine t_neighbour_deactivate( self )
+    !! deactivate the `t_neighbour` instance:
+    !! nullify pointers to C data, and deallocate any local array
     implicit none
     ! type( t_neighbour ), intent(inout) :: self
     class( t_neighbour ), intent(inout) :: self
@@ -160,11 +174,10 @@ contains
     if( associated(self%shifts))   nullify(self%shifts)
     if( associated(self%distances))nullify(self%distances)
     if( associated(self%vectors))  nullify(self%vectors)
-    call c_vesin_free(self%cdata)
-    self% active = .false.
     if(allocated(self%cumsum))deallocate(self%cumsum)
     if(allocated(self%ityp))  deallocate(self%ityp)
-  end subroutine t_neighbour_destroy
+    self% active = .false.
+  end subroutine t_neighbour_deactivate
 
 
 
@@ -196,10 +209,14 @@ contains
     integer :: n, i, idx
 
     ierr = -1
-    if( .not. self% active )then
+    if( .not. self% initialized )then
        self% errmsg = "compute:: t_neighbour instance not initialized."
        return
     end if
+
+    ! if we contain data from previous calc, deactivate and let vesin reuse
+    ! its allocation if it can
+    if( self% active ) call self% deactivate()
 
     ! set cutoff
     self%opts% cutoff = real( rcut, c_double )
@@ -242,6 +259,8 @@ contains
        self% cumsum(idx) = n
     end do
 
+    ! set as active
+    self% active = .true.
   end function t_neighbour_compute
 
 
