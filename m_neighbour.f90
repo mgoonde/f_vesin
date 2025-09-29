@@ -108,7 +108,10 @@ module m_neighbour
      procedure, public :: get     => t_neighbour_get
      procedure, public :: expand  => t_neighbour_expand
      procedure, public :: cluster => t_neighbour_cluster
-     procedure, public :: get_by_rcut => t_neighbour_get_by_rcut
+     procedure, private :: t_neighbour_get_by_rcut_single
+     procedure, private :: t_neighbour_get_by_rcut_list
+     generic, public :: get_by_rcut => t_neighbour_get_by_rcut_single
+     generic, public :: get_by_rcut => t_neighbour_get_by_rcut_list
      procedure, public :: deactivate => t_neighbour_deactivate
      ! final :: t_neighbour_destroy
      procedure, public :: destroy => t_neighbour_destroy
@@ -806,7 +809,7 @@ contains
   end function t_neighbour_cluster
 
 
-  function t_neighbour_get_by_rcut( self, idx, rcut, nat, ityp, pos, lat, &
+  function t_neighbour_get_by_rcut_single( self, idx, rcut, nat, ityp, pos, lat, &
        list, ityplist, veclist, shiftslist, include_idx ) result(n)
     !! get neighbor list of specific index atom, within specified atomic system,
     !! and with a cutoff different from the one in `self`.
@@ -814,7 +817,7 @@ contains
     class( t_neighbour ), intent(inout) :: self
 
     !> input atomic index
-    integer, intent(in)                 :: idx
+    integer, intent(in)  :: idx
 
     !> custom rcut
     real(rp), intent(in) :: rcut
@@ -859,6 +862,7 @@ contains
     integer, allocatable :: tmp(:)
     real(rp), allocatable :: vlist(:,:)
     real(rp) :: dist2, rcut2
+    ! real(rp) :: pos2(3,nat)
 
     if( idx < 1 .or. idx > nat ) then
        n = -1
@@ -882,6 +886,7 @@ contains
     ! write(*,*) "rcut",rcut
     ! write(*,*) "nbox:",nbox
 
+
     rcut2 = rcut*rcut
 
     n_cur = 0
@@ -900,8 +905,15 @@ contains
 
     ! my pos
     ri = pos(:,idx)
+    call cart_to_crist( ri, lat, invlat )
+    call periodic( ri )
+    call crist_to_cart( ri, lat, invlat )
+
     do j = 1, nat
        rj = pos(:,j)
+       call cart_to_crist( rij, lat, invlat )
+       call periodic( rij )
+       call crist_to_cart( rij, lat, invlat )
        ! for all box shifts
        do ii = -nbox(1), nbox(1)
           do jj = -nbox(2), nbox(2)
@@ -930,7 +942,7 @@ contains
 
     ! set output
     n = n_cur
-    if( present(list)) allocate(list, source=tmp)
+    if( present(list)) allocate(list, source=tmp(1:n))
     if( present(veclist)) allocate(veclist, source=vlist(1:3,1:n))
     if( present(shiftslist))allocate(shiftslist, source=slist(1:3,1:n))
     if( present(ityplist)) then
@@ -942,7 +954,152 @@ contains
 
 
     ! write(*,"(10i4)") tmp
-  end function t_neighbour_get_by_rcut
+  end function t_neighbour_get_by_rcut_single
+
+  function t_neighbour_get_by_rcut_list( self, idx_list, rcut, nat, ityp, pos, lat, &
+       list, ityplist, veclist, shiftslist, include_idx ) result(n)
+    !! get neighbor list of specific index atom, within specified atomic system,
+    !! and with a cutoff different from the one in `self`.
+    implicit none
+    class( t_neighbour ), intent(inout) :: self
+
+    !> input list of atomic index
+    integer, intent(in)  :: idx_list(:)
+
+    !> custom rcut
+    real(rp), intent(in) :: rcut
+
+    !> number of atoms
+    integer, intent(in) :: nat
+
+    !> atomic types
+    integer, intent(in) :: ityp(nat)
+
+    !> atomic positions
+    real(rp), intent(in) :: pos(3,nat)
+
+    !> lattice: lat(:,1)=v1, lat(:,2)=v2, lat(:,3)=v3
+    real(rp), intent(in) :: lat(3,3)
+
+    !> output list of neighbours to atom `idx`
+    integer, allocatable, intent(out), optional  :: list(:)
+
+    !> output list of atomic types neighbor to `idx`
+    integer, allocatable, intent(out), optional :: ityplist(:)
+
+    !> output list of vectors neighbour to `idx`
+    real(rp), allocatable, intent(out), optional :: veclist(:,:)
+
+    !> output list of box shifts for each neighbor
+    integer, allocatable, intent(out), optional :: shiftslist(:,:)
+
+    !> flag to include the atom `idx` in output. If .true., it will be on the first
+    !! element of output. Default=.false.
+    logical, intent(in), optional :: include_idx
+
+    !> output number of neighbours, or negative on error
+    integer :: n
+
+    integer :: i, j, idx, nlist
+    integer :: jj
+    integer :: tmp_n, tmp_idx
+    integer :: cursize, newsize, n_cur
+    integer, allocatable :: tmp_list(:), tmp_ityplist(:), tmp_shiftslist(:,:)
+    real(rp), allocatable :: tmp_veclist(:,:)
+    integer, allocatable :: tmp2_list(:), tmp2_ityplist(:), tmp2_shiftslist(:,:)
+    real(rp), allocatable :: tmp2_veclist(:,:)
+    integer, allocatable :: agg_list(:), agg_ityplist(:), agg_shiftslist(:,:)
+    real(rp), allocatable :: agg_veclist(:,:)
+    integer, allocatable :: jcheck(:)
+
+
+    ! compute for first index
+    idx = idx_list(1)
+    tmp_n = self% get_by_rcut( idx, rcut, nat, ityp, pos, lat, &
+         list=tmp_list, ityplist=tmp_ityplist, veclist=tmp_veclist, shiftslist=tmp_shiftslist,&
+         include_idx=include_idx )
+
+    nlist = size(idx_list)
+    allocate( agg_list, source=tmp_list )
+    allocate( agg_ityplist, source=tmp_ityplist )
+    allocate( agg_shiftslist, source=tmp_shiftslist )
+    allocate( agg_veclist, source=tmp_veclist )
+    cursize=tmp_n
+    ! counter
+    n_cur = tmp_n
+    ! compute for others in idx_list, shift them by pos(idx)
+    do i = 2, nlist
+       !
+       idx = idx_list(i)
+       tmp_n = self% get_by_rcut( idx, rcut, nat, ityp, pos, lat, &
+            list=tmp_list, ityplist=tmp_ityplist, veclist=tmp_veclist, shiftslist=tmp_shiftslist,&
+            include_idx=include_idx )
+       write(*,*) "from idx", idx
+       write(*,"(*(i5))") tmp_list
+
+       ! check for aggregator size
+       if( n_cur+tmp_n > cursize ) then
+          ! realloc
+          newsize = cursize + tmp_n
+          call move_alloc( agg_list, tmp2_list )
+          allocate( agg_list(1:newsize) )
+          agg_list(1:cursize) = tmp2_list
+          deallocate( tmp2_list )
+          !
+          call move_alloc( agg_ityplist, tmp2_ityplist )
+          allocate( agg_ityplist(1:newsize) )
+          agg_ityplist(1:cursize) = tmp2_ityplist
+          deallocate( tmp2_ityplist )
+          !
+          call move_alloc( agg_shiftslist, tmp2_shiftslist )
+          allocate( agg_shiftslist(1:3,1:newsize))
+          agg_shiftslist(1:3,1:cursize) = tmp2_shiftslist
+          deallocate( tmp2_shiftslist )
+          !
+          call move_alloc( agg_veclist, tmp2_veclist )
+          allocate( agg_veclist(1:3,1:newsize))
+          agg_veclist(1:3,1:cursize) = tmp2_veclist
+          deallocate( tmp2_veclist )
+          !
+          cursize = newsize
+       end if
+
+
+       j_: do j = 1, tmp_n
+          tmp_idx = tmp_list(j)
+          if( any(agg_list(1:n_cur)==tmp_list(j)) ) then
+             ! check for all instances, if same vec, same shift
+             ! jcheck contains all instances of index tmp_list(j) in agg lists
+             jcheck = pack( [(i,i=1,n_cur)], [agg_list(1:n_cur)-tmp_idx==0])
+             ! write(*,*) "tmp_list(j)",tmp_list(j)
+             ! write(*,"(*(i4))") agg_list(1:n_cur)
+             ! write(*,*) "jcheck:", jcheck
+             do jj = 1, size(jcheck)
+                if( agg_ityplist(jj) == tmp_ityplist(j) .and. &
+                     all(agg_shiftslist(:,jj) == tmp_shiftslist(:,j)) .and. &
+                     all(abs(agg_veclist(:,jj))-abs(tmp_veclist(:,j)) < 1e-6) ) cycle j_
+             end do
+          end if
+
+          ! write(*,*) "adding", tmp_list(j)
+          n_cur = n_cur + 1
+          agg_list(n_cur) = tmp_list(j)
+          agg_ityplist(n_cur) = tmp_ityplist(j)
+          agg_shiftslist(:,n_cur) = tmp_shiftslist(:,j)
+          agg_veclist(:,n_cur) = tmp_veclist(:,j) - (pos(:,idx) - pos(:,idx_list(1)))
+       end do j_
+
+       deallocate( tmp_list, tmp_shiftslist, tmp_ityplist, tmp_veclist )
+    end do
+
+    if( present(list)) allocate(list, source=agg_list(1:n_cur))
+    if(present(ityplist))allocate(ityplist, source=agg_ityplist(1:n_cur))
+    if(present(veclist))allocate(veclist, source=agg_veclist(1:3,1:n_cur))
+    if(present(shiftslist))allocate(shiftslist, source=agg_shiftslist(1:3,1:n_cur))
+    n = n_cur
+
+  end function t_neighbour_get_by_rcut_list
+
 
 
   ! transform `type(c_ptr)` string to fortran `character(:),allocatable` string
@@ -1022,8 +1179,8 @@ contains
     ! invlat is inverse of lat
     implicit none
     real(rp), intent(inout) :: rij(:)
-    real(rp), intent(in) :: lat(size(rij), size(rij))
-    real(rp), intent(in) :: invlat(size(rij), size(rij))
+    real(rp), intent(in) :: lat(:,:)
+    real(rp), intent(in) :: invlat(:,:)
 
     rij = matmul( lat, rij )
   end subroutine crist_to_cart
@@ -1038,8 +1195,8 @@ contains
     ! invlat is inverse of lat
     implicit none
     real(rp), intent(inout) :: rij(:)
-    real(rp), intent(in) :: lat(size(rij), size(rij))
-    real(rp), intent(in) :: invlat(size(rij), size(rij))
+    real(rp), intent(in) :: lat(:,:)
+    real(rp), intent(in) :: invlat(:,:)
 
     rij = matmul( invlat, rij )
   end subroutine cart_to_crist
