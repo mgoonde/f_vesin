@@ -15,6 +15,7 @@ module m_neighbour
   private
   public :: rp
   public :: t_neighbour
+  public :: t_neighbour_copy
 
   ! precision, modify as needed
   integer, parameter :: rp = c_double
@@ -79,7 +80,7 @@ module m_neighbour
   type, public :: t_neighbour
 
      ! ----- private ------
-     private
+     ! private
      ! vesin stuffs
      type( c_vesinOptions ) :: opts       !< Computation options
      type( c_vesinNeighborList ) :: cdata !< Returned C data
@@ -94,6 +95,8 @@ module m_neighbour
      real( c_double ), pointer :: vectors(:,:) => null()    !< shape[3, length]
 
      ! local, private
+     logical :: is_copy = .false. !< when .true., the instance is a copy of another,
+                                  !! which means pointer data is allocated, not associated
      integer, allocatable :: cumsum(:) !< cumulative sum of nneig
      integer, allocatable :: ityp(:) !< copy of ityp
 
@@ -164,7 +167,7 @@ contains
     class( t_neighbour ), intent(inout) :: self
     call self% deactivate()
     self% initialized = .false.
-    call c_vesin_free(self%cdata)
+    if( .not. self%is_copy ) call c_vesin_free(self%cdata)
   end subroutine t_neighbour_destroy
 
   subroutine t_neighbour_deactivate( self )
@@ -173,10 +176,18 @@ contains
     implicit none
     ! type( t_neighbour ), intent(inout) :: self
     class( t_neighbour ), intent(inout) :: self
-    if( associated(self%pairs))    nullify(self%pairs)
-    if( associated(self%shifts))   nullify(self%shifts)
-    if( associated(self%distances))nullify(self%distances)
-    if( associated(self%vectors))  nullify(self%vectors)
+    if( self%is_copy ) then
+       if( associated(self%pairs))    deallocate(self%pairs)
+       if( associated(self%shifts))   deallocate(self%shifts)
+       if( associated(self%distances))deallocate(self%distances)
+       if( associated(self%vectors))  deallocate(self%vectors)
+    else
+       if( associated(self%pairs))    nullify(self%pairs)
+       if( associated(self%shifts))   nullify(self%shifts)
+       if( associated(self%distances))nullify(self%distances)
+       if( associated(self%vectors))  nullify(self%vectors)
+    end if
+
     if(allocated(self%cumsum))deallocate(self%cumsum)
     if(allocated(self%ityp))  deallocate(self%ityp)
     self% active = .false.
@@ -911,9 +922,9 @@ contains
 
     do j = 1, nat
        rj = pos(:,j)
-       call cart_to_crist( rij, lat, invlat )
-       call periodic( rij )
-       call crist_to_cart( rij, lat, invlat )
+       call cart_to_crist( rj, lat, invlat )
+       call periodic( rj )
+       call crist_to_cart( rj, lat, invlat )
        ! for all box shifts
        do ii = -nbox(1), nbox(1)
           do jj = -nbox(2), nbox(2)
@@ -1099,6 +1110,27 @@ contains
     n = n_cur
 
   end function t_neighbour_get_by_rcut_list
+
+
+  subroutine t_neighbour_copy( from, to )
+    !! allocate Fortran pointers, not associate to C-data
+    implicit none
+    type( t_neighbour ), intent(in) :: from
+    ! type( t_neighbour ), pointer, intent(out) :: to
+    type( t_neighbour ), intent(out) :: to
+    to = t_neighbour()
+    ! we are making a hard-copy, indicate that data is allocated here
+    to% is_copy = .true.
+    to% length = from% length
+    if( associated(from%pairs) ) allocate( to%pairs, source=from%pairs )
+    if( associated(from%shifts) ) allocate( to%shifts, source=from%shifts )
+    if( associated(from%distances) ) allocate( to%distances, source=from%distances )
+    if( associated(from%vectors) ) allocate( to%vectors, source=from%vectors )
+    if( allocated( from%cumsum)) allocate( to%cumsum, source=from%cumsum )
+    if( allocated( from%ityp)) allocate( to%ityp, source=from%ityp )
+    ! indicate data is present
+    to% active = .true.
+  end subroutine t_neighbour_copy
 
 
 
