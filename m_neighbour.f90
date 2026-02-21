@@ -8,7 +8,8 @@ module m_neighbour
        c_VesinNeighborList => VesinNeighborList, &
        c_vesin_neighbors => vesin_neighbors, &
        c_vesin_free => vesin_free, &
-       VesinUnknownDevice, VesinCPU
+       c_vesinDevice => VesinDevice, &
+       VesinUnknownDevice, VesinCPU, VesinAutoAlgorithm
 
   implicit none
 
@@ -84,7 +85,8 @@ module m_neighbour
      ! vesin stuffs
      type( c_vesinOptions ) :: opts       !< Computation options
      type( c_vesinNeighborList ) :: cdata !< Returned C data
-     integer :: device = VesinCPU
+     ! integer :: device = VesinCPU
+     type( c_vesinDevice ) :: device
      logical :: initialized = .false.          !< .true. when initialized
      logical :: active = .false.          !< .true. when it contains data
      ! pointers to C data, in C precision
@@ -145,12 +147,16 @@ contains
 
     ! allocate( t_neighbour::self )
 
+    self%device%type = vesinCPU
+    self%device%device_id = 0
+
     ! some vesin options
     self%opts% full             = .true.
     self%opts% sorted           = .true.
     self%opts% return_shifts    = .true.
     self%opts% return_distances = .false.
     self%opts% return_vectors   = .true.
+    self%opts% algorithm        = VesinAutoAlgorithm
     if( present(return_distances)) self%opts% return_distances = return_distances
 
     ! set as initialized
@@ -218,7 +224,7 @@ contains
     !> nonzero on error
     integer :: ierr
 
-    logical(c_bool) :: periodic
+    logical(c_bool) :: periodic(3)
     type( c_ptr ) :: c_errmsg
     integer :: n, i, idx
 
@@ -235,7 +241,7 @@ contains
     ! set cutoff
     self%opts% cutoff = real( rcut, c_double )
     ! periodic
-    periodic = logical( .true., c_bool )
+    periodic(:) = logical( .true., c_bool )
 
     ! save typ
     allocate( self% ityp, source=typ )
