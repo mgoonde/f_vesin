@@ -584,6 +584,13 @@ contains
        return
     end if
 
+    ! check if input list is allocated
+    if( .not. allocated(list)) then
+       self%errmsg="expand:: input list not allocated."
+       n = -1
+       return
+    end if
+
     ! check indices in input list
     nat = size(self%cumsum)
     if( any(list .le. 0) .or. any(list .gt. nat) ) then
@@ -743,7 +750,8 @@ contains
 
   function t_neighbour_cluster( self, idx, list ) result( n )
     !! check if the input `list` is a cluster graph, and return only the complete graph
-    !! around `idx`. The order of indices might be lost on output.
+    !! around `idx`. The returned `list` is strictly a subset of the input `list`.
+    !! The order of indices might be lost on output.
     !! NOTE: works purely on indices, no regard for pbc or not.
     implicit none
 
@@ -767,6 +775,13 @@ contains
     if(.not.allocated(self%cumsum)) then
        ! neiglist not computed
        self% errmsg="cluster:: neighbor list not computed."
+       n = -1
+       return
+    end if
+
+    ! check if input list allocated
+    if( .not. allocated(list)) then
+       self% errmsg="cluster:: input list not allocated."
        n = -1
        return
     end if
