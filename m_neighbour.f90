@@ -50,7 +50,7 @@ module m_neighbour
   !!    ! the atomic types into `neig_ityp`,
   !!    ! the vectors to `neig_coords`, and
   !!    ! include the original `idx` in the lists.
-  !!    n = neigh% get( idx = 5, nbond = 2, include_idx = .true., &
+  !!    n = neigh% get( idx = 5, nshell = 2, include_idx = .true., &
   !!                    list     = neig_idx, &
   !!                    ityplist = neig_ityp, &
   !!                    veclist  = neig_coords )
@@ -285,8 +285,8 @@ contains
 
 
 
-  function t_neighbour_get( self, idx, list, ityplist, veclist, shiftslist, nbond, include_idx )result(n)
-    !! Get the neighbor data of `idx` from neighbour list, up to `nbond` neighbor shells.
+  function t_neighbour_get( self, idx, list, ityplist, veclist, shiftslist, nshell, include_idx )result(n)
+    !! Get the neighbor data of `idx` from neighbour list, up to `nshell` neighbor shells.
     !! Return `n` which is the number of neighbors, or negative on error.
     !! The vector of atom `idx` is NOT included in output by default.
     implicit none
@@ -307,8 +307,8 @@ contains
     !> output list of box shifts for each neighbor
     integer, allocatable, intent(out), optional :: shiftslist(:,:)
 
-    !> how many bond shells to get (default=1). If `nbond>1`, the output list is not sorted
-    integer, intent(in), optional :: nbond
+    !> how many neighbor shells to get (default=1). If `nshell>1`, the output list is not sorted
+    integer, intent(in), optional :: nshell
 
     !> flag to include the atom `idx` in output. If .true., it will be on the first
     !! element of output. Default=.false.
@@ -337,7 +337,7 @@ contains
     if( present(include_idx))inc_idx = include_idx
 
     nb = 1
-    if(present(nbond))nb=nbond
+    if(present(nshell))nb=nshell
     if( nb < 1 ) then
        n = 0
        return
@@ -535,8 +535,8 @@ contains
   end function t_neighbour_get_nn
 
 
-  function t_neighbour_expand( self, nbond, list, ityplist, veclist, shiftslist ) result( n )
-    !! expand the list in input by `nbond` number of bond shells.
+  function t_neighbour_expand( self, nshell, list, ityplist, veclist, shiftslist ) result( n )
+    !! expand the list in input by `nshell` number of neighbor shells.
     !! NOTE: pbc are not taken into account here, the expansion goes beyond the cell,
     !! which means the same atom index can repeat multiple times on different positions,
     !! as copies of itself by periodicity.
@@ -544,7 +544,7 @@ contains
     class( t_neighbour ), intent(inout) :: self
 
     !> number of bons shells to expand
-    integer, intent(in) :: nbond
+    integer, intent(in) :: nshell
 
     !> Assumed allocated on input, containing list to be expanded;
     !! on output: expanded list
@@ -568,7 +568,7 @@ contains
     integer, allocatable :: work(:), swork(:,:)
     real(rp), allocatable :: vwork(:,:), vtmp(:,:)
     integer, parameter :: batchsize=50
-    integer :: ibond, ii, nl_idx, nn, jj, j
+    integer :: ishell, ii, nl_idx, nn, jj, j
     integer, allocatable :: l_idx(:)
     real(rp), allocatable :: vl_idx(:,:)
     integer, allocatable :: mybox(:,:), stmp(:,:), sl_box(:,:)
@@ -618,8 +618,8 @@ contains
     ! first index
     nprev = 1
 
-    do ibond = 1, nbond
-       ! write(*,*) ">> ibond",ibond
+    do ishell = 1, nshell
+       ! write(*,*) ">> ishell",ishell
        ! current size
        nn = n
        do iatm = nprev, nn
@@ -697,7 +697,7 @@ contains
        !    write(*,"(i4,3x,3f9.4,3x,3i3)") work(i), vwork(:,i), mybox(:,i)
        ! end do
 
-    end do ! ibond
+    end do ! ishell
 
 
     ! write(*,*) "work:"
@@ -797,7 +797,7 @@ contains
     end if
     do while( more )
        more = .false.
-       ! expand by one bond
+       ! expand by one shell
        allocate(nn, source = work(1:cur_size))
        n_old = cur_size
        num = self% expand( 1, nn )

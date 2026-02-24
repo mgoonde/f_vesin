@@ -38,7 +38,7 @@ program main
 
 
   ! retrieve neighbor data fo some index
-  n = neigh% get( 2, nbond=3, ityplist=neigh_ityp, veclist=neigh_coords, include_idx=.true. )
+  n = neigh% get( 2, nshell=3, ityplist=neigh_ityp, veclist=neigh_coords, include_idx=.true. )
   if( n .lt. 0 ) then
      write(*,*) neigh% errmsg
      error stop
