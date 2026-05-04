@@ -16,8 +16,7 @@ FetchContent_MakeAvailable(vesin_git)
 
 add_library( m_neighbour OBJECT m_neighbour.f90 )
 
-# enable_language(CXX)
-target_link_libraries( m_neighbour PUBLIC vesin_fortran )
+target_link_libraries( m_neighbour PRIVATE vesin_fortran )
 target_include_directories( m_neighbour INTERFACE ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(test)

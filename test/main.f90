@@ -48,7 +48,7 @@ program main
   write(*,*) n
   write(*,*)
   do i = 1, n
-     write(*,*) neigh_ityp(i), neigh_coords(:,i)
+     write(*,"(2x,i3,3x,3(g12.6,:,1x))") neigh_ityp(i), neigh_coords(:,i)
   end do
 
   call neigh% destroy()

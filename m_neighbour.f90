@@ -78,7 +78,7 @@ module m_neighbour
   !!    call neigh% destroy()
   !!
   !!~~~~~~~~~~
-  type, public :: t_neighbour
+  type :: t_neighbour
 
      ! ----- private ------
      ! private
